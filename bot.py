@@ -114,6 +114,13 @@ def add_task(uid, data, fallback):
     c.commit(); i = cur.lastrowid; c.close(); return i, False
 
 
+def add_reminder(uid, data):
+    if cloud.configured():
+        i = cloud.create_reminder(uid, data)
+        if i is not None: return i, True
+    return None, False
+
+
 def add_transaction(uid, transaction_type, data):
     if cloud.configured():
         i = cloud.create_transaction(uid, transaction_type, data)
@@ -128,7 +135,6 @@ def add_transaction(uid, transaction_type, data):
     if transaction_type == "expense":
         cur = c.execute("INSERT INTO expenses (telegram_id,amount,category,note,created_at) VALUES (?,?,?,?,?)", (uid, amount, data.get("category", "Lainnya"), data.get("note") or data.get("description"), datetime.now(WIB).isoformat()))
     else:
-        # Keep income in local fallback as a note until cloud is configured.
         cur = c.execute("INSERT INTO expenses (telegram_id,amount,category,note,created_at) VALUES (?,?,?,?,?)", (uid, -amount, data.get("category", "Pemasukan"), data.get("note") or data.get("description"), datetime.now(WIB).isoformat()))
     c.commit(); i = cur.lastrowid; c.close(); return i, amount, False
 
@@ -153,12 +159,12 @@ def add_note(uid, data, fallback):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cloud.ensure_user(update.effective_user)
     await update.message.reply_text(
-      "👋 Halo! Saya *NEXA*.\n\nYour life, organized by AI.\n\nKirim perintah dengan bahasa biasa:\n• `Buat task menyelesaikan laporan besok`\n• `Catat pengeluaran 25000 makan`\n• `Catat pemasukan 500000 gaji`\n• `Buat goal beli iPhone target 15000000`\n• `Simpan catatan ide aplikasi AI`\n\nData: " + data_source(),
+      "👋 Halo! Saya *NEXA*.\n\nYour life, organized by AI.\n\nKirim perintah dengan bahasa biasa:\n• `Buat task menyelesaikan laporan besok`\n• `Catat pengeluaran 25000 makan`\n• `Catat pemasukan 500000 gaji`\n• `Buat goal beli iPhone target 15000000`\n• `Ingatkan aku besok jam 9 kirim laporan`\n\nData: " + data_source(),
       parse_mode="Markdown", reply_markup=menu())
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🧠 *NEXA memahami bahasa natural.*\n\nContoh:\n`Buat task upload website Jumat`\n`Catat pengeluaran 35 ribu transport`\n`Catat pemasukan 2 juta freelance`\n`Aku mau nabung 10 juta untuk laptop`\n`Simpan ide: bikin landing page AI`", parse_mode="Markdown", reply_markup=back())
+    await update.message.reply_text("🧠 *NEXA memahami bahasa natural.*\n\nContoh:\n`Buat task upload website Jumat`\n`Catat pengeluaran 35 ribu transport`\n`Catat pemasukan 2 juta freelance`\n`Aku mau nabung 10 juta untuk laptop`\n`Ingatkan aku besok jam 9 kirim laporan`", parse_mode="Markdown", reply_markup=back())
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -173,6 +179,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action in ("create_task", "task"):
             i, remote = add_task(uid, data, text)
             await update.message.reply_text(reply or f"✅ Task dibuat. ID #{i} {'☁️' if remote else '💾'}"); return
+        if action in ("create_reminder", "reminder"):
+            i, remote = add_reminder(uid, data)
+            if i:
+                await update.message.reply_text(reply or f"⏰ Reminder dibuat. ID #{i} {'☁️' if remote else '💾'}"); return
+            await update.message.reply_text(reply or "⏰ Reminder dipahami, tapi belum bisa disimpan. Pastikan waktu reminder jelas."); return
         if action in ("create_expense", "expense"):
             created = add_transaction(uid, "expense", data)
             if created:
@@ -197,7 +208,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         i, remote = add_task(update.effective_user.id, {}, text.split(" ", 2)[-1])
         await update.message.reply_text(f"✅ Task dibuat. ID #{i} {'☁️ Supabase' if remote else '💾 lokal'}")
     else:
-        await update.message.reply_text("🧠 Pesan diterima. NEXA AI belum terhubung di environment bot ini. Atur NEXA_AI_URL.", reply_markup=menu())
+        await update.message.reply_text("🧠 NEXA belum dapat memproses pesan ini. Pastikan NEXA_AI_URL dan secret environment sudah terpasang.", reply_markup=menu())
 
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
