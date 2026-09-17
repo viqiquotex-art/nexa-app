@@ -78,6 +78,29 @@ def create_reminder(telegram_id, data):
     return result[0]["id"] if result else None
 
 
+def list_due_reminders():
+    if not configured():
+        return []
+    now = datetime.now(timezone.utc).isoformat()
+    return _request("GET", "reminders", params={
+        "status": "eq.pending",
+        "remind_at": f"lte.{now}",
+        "select": "id,telegram_id,title,remind_at",
+        "order": "remind_at.asc",
+        "limit": "50",
+    }) or []
+
+
+def mark_reminder_sent(reminder_id):
+    result = _request(
+        "PATCH", "reminders",
+        params={"id": f"eq.{reminder_id}"},
+        json={"status": "sent"},
+        prefer="return=minimal",
+    )
+    return result is not None
+
+
 def create_transaction(telegram_id, transaction_type, data):
     raw = data.get("amount") or data.get("nominal")
     if raw is None:
