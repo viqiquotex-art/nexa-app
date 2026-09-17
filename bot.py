@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sqlite3
@@ -156,6 +157,47 @@ def add_note(uid, data, fallback):
     c.commit(); i = cur.lastrowid; c.close(); return i
 
 
+async def reminder_loop(app):
+    """Check Supabase every 30 seconds and deliver due reminders to Telegram."""
+    while True:
+        try:
+            if cloud.configured():
+                for reminder in cloud.list_due_reminders():
+                    reminder_id = reminder.get("id")
+                    telegram_id = reminder.get("telegram_id")
+                    title = reminder.get("title") or "Pengingat"
+                    if not reminder_id or not telegram_id:
+                        continue
+                    try:
+                        await app.bot.send_message(
+                            chat_id=int(telegram_id),
+                            text=f"⏰ *NEXA Reminder*\n\n{title}",
+                            parse_mode="Markdown",
+                        )
+                        cloud.mark_reminder_sent(reminder_id)
+                        print(f"Reminder sent: #{reminder_id} -> {telegram_id}")
+                    except Exception as exc:
+                        print(f"Reminder delivery error #{reminder_id}: {exc}")
+        except Exception as exc:
+            print(f"Reminder scheduler error: {exc}")
+        await asyncio.sleep(30)
+
+
+async def post_init(app):
+    app.bot_data["reminder_task"] = asyncio.create_task(reminder_loop(app))
+    print("NEXA reminder scheduler aktif (30s)")
+
+
+async def post_shutdown(app):
+    task = app.bot_data.get("reminder_task")
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cloud.ensure_user(update.effective_user)
     await update.message.reply_text(
@@ -246,7 +288,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == "__main__":
     init_db()
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).post_init(post_init).post_shutdown(post_shutdown).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
