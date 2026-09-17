@@ -25,14 +25,17 @@ def _headers(prefer: str | None = None):
 def _request(method: str, table: str, *, params=None, json=None, prefer=None):
     if not configured():
         return None
-    url = f"{SUPABASE_URL}/rest/v1/{table}"
     try:
         with httpx.Client(timeout=15) as client:
-            response = client.request(method, url, params=params, json=json, headers=_headers(prefer))
+            response = client.request(
+                method,
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                params=params,
+                json=json,
+                headers=_headers(prefer),
+            )
             response.raise_for_status()
-            if not response.content:
-                return []
-            return response.json()
+            return response.json() if response.content else []
     except httpx.HTTPError as exc:
         print(f"Supabase {table} error: {exc}")
         return None
@@ -50,16 +53,28 @@ def ensure_user(user):
 
 
 def create_task(telegram_id, data, fallback):
-    title = data.get("title") or data.get("task") or fallback
     payload = {
         "telegram_id": telegram_id,
-        "title": title,
+        "title": data.get("title") or data.get("task") or fallback,
         "description": data.get("description"),
         "deadline": data.get("deadline"),
         "priority": data.get("priority", "medium"),
         "status": data.get("status", "pending"),
     }
-    result = _request("POST", "tasks", json=payload, prefer="return=representation")
+    result = _request("POST", "telegram_tasks", json=payload, prefer="return=representation")
+    return result[0]["id"] if result else None
+
+
+def create_reminder(telegram_id, data):
+    title = data.get("title") or data.get("reminder")
+    remind_at = data.get("remind_at")
+    if not title or not remind_at:
+        return None
+    result = _request(
+        "POST", "reminders",
+        json={"telegram_id": telegram_id, "title": title, "remind_at": remind_at},
+        prefer="return=representation",
+    )
     return result[0]["id"] if result else None
 
 
@@ -71,14 +86,17 @@ def create_transaction(telegram_id, transaction_type, data):
         amount = float(str(raw).replace(".", "").replace(",", ""))
     except ValueError:
         return None
-    payload = {
-        "telegram_id": telegram_id,
-        "type": transaction_type,
-        "amount": amount,
-        "category": data.get("category", "Lainnya"),
-        "description": data.get("description") or data.get("note"),
-    }
-    result = _request("POST", "transactions", json=payload, prefer="return=representation")
+    result = _request(
+        "POST", "transactions",
+        json={
+            "telegram_id": telegram_id,
+            "type": transaction_type,
+            "amount": amount,
+            "category": data.get("category", "Lainnya"),
+            "description": data.get("description") or data.get("note"),
+        },
+        prefer="return=representation",
+    )
     return result[0]["id"] if result else None
 
 
@@ -91,19 +109,26 @@ def create_goal(telegram_id, data):
         target = float(target) if target is not None else None
     except (ValueError, TypeError):
         target = None
-    payload = {
-        "telegram_id": telegram_id,
-        "title": title,
-        "target_amount": target,
-        "current_amount": float(data.get("current_amount", data.get("saved_amount", 0)) or 0),
-        "deadline": data.get("deadline"),
-    }
-    result = _request("POST", "goals", json=payload, prefer="return=representation")
+    try:
+        current = float(data.get("current_amount", data.get("saved_amount", 0)) or 0)
+    except (ValueError, TypeError):
+        current = 0
+    result = _request(
+        "POST", "goals",
+        json={
+            "telegram_id": telegram_id,
+            "title": title,
+            "target_amount": target,
+            "current_amount": current,
+            "deadline": data.get("deadline"),
+        },
+        prefer="return=representation",
+    )
     return result[0]["id"] if result else None
 
 
 def list_tasks(telegram_id):
-    return _request("GET", "tasks", params={
+    return _request("GET", "telegram_tasks", params={
         "telegram_id": f"eq.{telegram_id}",
         "status": "neq.done",
         "order": "created_at.desc",
